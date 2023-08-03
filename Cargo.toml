@@ -17,3 +17,8 @@ synerex_api = { git = "https://github.com/exdata-inc/synerex_api.git", rev = "9c
 synerex_proto = { git = "https://github.com/exdata-inc/synerex_proto.git", rev = "a2cad4f8278c4c5ceb4d73f97fd5e5d5c3ffda82"}
 tokio = { version = "1.29.1", features = ["full"] }
 
+[profile.release]
+panic = 'abort'
+codegen-units = 1
+opt-level = 'z'
+lto = true
