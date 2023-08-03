@@ -1,5 +1,5 @@
 # rust-template
-Tempalte repository for Rust projects with sxutil
+Template repository for Rust projects with sxutil
 
 ## Run
 You should run [Synerex Nodeserv](https://github.com/synerex/synerex_nodeserv) and [Synerex Server](https://github.com/synerex/synerex_server) before running commands below.
