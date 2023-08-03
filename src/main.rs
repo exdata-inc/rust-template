@@ -7,6 +7,7 @@ use std::env;
 use std::sync::Arc;
 
 // External Library
+use chrono::Local;
 use clap::Parser;
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -53,7 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env::set_var("RUST_LOG", args.log_level);
     logger::init();
 
-    info!("Started Program!");
+    let start_time = Local::now();
+    info!("Started Program at {}", start_time.format("%F %T %:z"));
 
     debug!("Using Synerex Config: Node: {}, Synerex: {}", args.node_addr, args.sx_addr);
 
@@ -114,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cdata: api::Content { entity: vec![] },
                 }).await;
                 if sx_res.is_some() {
-                    info!("Sent NotifySupply msg: {}", msg.len());
+                    info!("Sent NotifySupply msg[{}], len: {}", i, msg.len());
                 } else {
                     error!("Failed to send NotifySupply msg");
                 }
@@ -141,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-
-    info!("Finished Program!");
+    let finish_time = Local::now();
+    info!("Finished Program at {}", finish_time.format("%F %T %:z"));
     Ok(())
 }
