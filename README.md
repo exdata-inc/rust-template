@@ -4,15 +4,19 @@ Template repository for Rust projects with sxutil
 ## Run
 You should run [Synerex Nodeserv](https://github.com/synerex/synerex_nodeserv) and [Synerex Server](https://github.com/synerex/synerex_server) before running commands below.
 
-### Supplier
+### Notifier
 ```
-cargo run -- -m supply
+cargo run -- -m notify
 ```
-### Subscriber
+### DemandSubscriber
 ```
-cargo run -- -m subscribe
+cargo run -- -m subscribe -t demand
 ```
-### Echo (Subscribe + Supply)
+### SupplySubscriber
+```
+cargo run -- -m subscribe -t supply
+```
+### Echo (Subscribe + Notify)
 ```
 cargo run -- -m echo
 ```

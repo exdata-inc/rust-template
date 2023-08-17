@@ -23,14 +23,17 @@ struct Args {
     node_addr: String,
     #[arg(short = 's', long = "sx_addr", value_name = "Synerex Server Address", default_value = "use_default")]
     sx_addr: String,
-    #[arg(short = 'm', long = "mode", value_name = "Synerex Provider Mode", default_value = "supply")]
+    #[arg(short = 'm', long = "mode", value_name = "Synerex Provider Mode", default_value = "notify")]
     mode: String,
+    #[arg(short = 't', long = "msg_type", value_name = "Synerex Message Mode", default_value = "supply")]
+    msg_type: String,
     #[arg(short = 'l', long = "log_level", value_name = "Log Level (ERROR, INFO, DEBUG)", default_value = "INFO")]
     log_level: String,
 }
 
 static SX_ADDR: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
-static SX_SERVICE_CLIENT: async_once_cell::OnceCell<Arc<Mutex<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
+static SX_SERVICE_CLIENT_1: async_once_cell::OnceCell<Arc<Mutex<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
+static SX_SERVICE_CLIENT_2: async_once_cell::OnceCell<Arc<Mutex<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
 
 async fn supply_callback(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
@@ -68,6 +71,41 @@ async fn supply_callback(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Suppl
     }
 }
 
+async fn demand_callback(_sxsv_clt: &mut sxutil::SXServiceClient, dm: api::Demand) {
+    match dm.demand_name.as_str() {
+        "Rust:Template" => {
+            let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
+            if v["@type"].as_str().is_none() {
+                error!("Unknown Demand Type! {:?}", v);
+            }
+            match v["@type"].as_str().unwrap() {
+                "rust:template" => {
+                    info!("Rust Template Demand: {:?}", v);
+                }
+                &_ => {
+                    warn!("Unknown Demand: {:?} {:?}", dm.demand_name.as_str(), v);
+                }
+            }
+        }
+        "Rust:TemplateEcho" => {
+            let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
+            if v["@type"].as_str().is_none() {
+                error!("Unknown Demand Type! {:?}", v);
+            }
+            match v["@type"].as_str().unwrap() {
+                "rust:template-echo" => {
+                    info!("Rust Template Echo Demand: {:?}", v);
+                }
+                &_ => {
+                    warn!("Unknown Demand: {:?} {:?}", dm.demand_name.as_str(), v);
+                }
+            }
+        }
+        &_ => {
+            warn!("Unknown Demand: {:?}", dm.demand_name.as_str());
+        }
+    }
+}
 
 async fn supply_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
@@ -85,7 +123,7 @@ async fn supply_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::
                         },
                         "@id": "supply_node",
                         "@type": "rust:template-echo",
-                        "schema:name": format!("Message from Supply Mode Node.")
+                        "schema:name": format!("Message from Supply-echo Mode Node.")
                     }).to_string();
                     let sx_res = _sxsv_clt.notify_supply(sxutil::SupplyOpts{
                         id: 0,
@@ -101,12 +139,54 @@ async fn supply_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::
                     }
                 }
                 &_ => {
-                    warn!("Unknown Supply: {:?} {:?}", sp.supply_name.as_str(), v);
+                    warn!("Ignore Supply: {:?} {:?}", sp.supply_name.as_str(), v);
                 }
             }
         }
         &_ => {
             warn!("Ignore Supply: {:?}", sp.supply_name.as_str());
+        }
+    }
+}
+
+async fn demand_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, dm: api::Demand) {
+    match dm.demand_name.as_str() {
+        "Rust:Template" => {
+            let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
+            if v["@type"].as_str().is_none() {
+                error!("Unknown Demand Type! {:?}", v);
+            }
+            match v["@type"].as_str().unwrap() {
+                "rust:template" => {
+                    info!("Rust Template Demand: {:?}", v);
+                    let msg = json!({
+                        "@context": {
+                            "schema": "https://schema.org/"
+                        },
+                        "@id": "supply_node",
+                        "@type": "rust:template-echo",
+                        "schema:name": format!("Message from Demand-echo Mode Node.")
+                    }).to_string();
+                    let sx_res = _sxsv_clt.notify_demand(sxutil::DemandOpts{
+                        id: 0,
+                        target: 0,
+                        name: "Rust:TemplateEcho".to_string(),
+                        json: msg.clone(),
+                        cdata: api::Content { entity: vec![] },
+                    }).await;
+                    if sx_res.is_some() {
+                        info!("Sent NotifyDemand msg, len: {}", msg.len());
+                    } else {
+                        error!("Failed to send NotifyDemand msg");
+                    }
+                }
+                &_ => {
+                    warn!("Ignore Demand: {:?} {:?}", dm.demand_name.as_str(), v);
+                }
+            }
+        }
+        &_ => {
+            warn!("Ignore Demand: {:?}", dm.demand_name.as_str());
         }
     }
 }
@@ -152,15 +232,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize Synerex service client.
     let arg_json = String::from(format!("{{{}}}", nm));
-    SX_SERVICE_CLIENT.get_or_init(async {
+    SX_SERVICE_CLIENT_1.get_or_init(async {
         let sx_service_client = sxutil::new_sx_service_client(client.unwrap(), synerex_proto::JSON_DATA_SVC, arg_json).await;
         Arc::new(Mutex::new(sx_service_client)) 
     }).await;
-    debug!("SXServiceClient: {:?}", SX_SERVICE_CLIENT.get().unwrap().lock().await);
+    debug!("SXServiceClient: {:?}", SX_SERVICE_CLIENT_1.get().unwrap().lock().await);
 
     match &*args.mode {
-        "supply" => {
-            // Supply Mode
+        "notify" => {
+            // Notify Mode
             let mut i = 0;
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -168,35 +248,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "@context": {
                         "schema": "https://schema.org/"
                     },
-                    "@id": "supply_node",
+                    "@id": "notify_node",
                     "@type": "rust:template",
-                    "schema:name": format!("Message from Supply Mode Node. Count = {}", i)
+                    "schema:name": format!("Message from Notify Mode Node. Count = {}", i)
                 }).to_string();
-                let sx_res = SX_SERVICE_CLIENT.get().unwrap().lock().await.notify_supply(sxutil::SupplyOpts{
-                    id: 0,
-                    target: 0,
-                    name: "Rust:Template".to_string(),
-                    json: msg.clone(),
-                    cdata: api::Content { entity: vec![] },
-                }).await;
-                if sx_res.is_some() {
-                    info!("Sent NotifySupply msg[{}], len: {}", i, msg.len());
+                if i % 2 == 0 {
+                    let sx_res = SX_SERVICE_CLIENT_1.get().unwrap().lock().await.notify_supply(sxutil::SupplyOpts{
+                        id: 0,
+                        target: 0,
+                        name: "Rust:Template".to_string(),
+                        json: msg.clone(),
+                        cdata: api::Content { entity: vec![] },
+                    }).await;
+                    if sx_res.is_some() {
+                        info!("Sent NotifySupply msg[{}], {}", i, sx_res.unwrap());
+                    } else {
+                        error!("Failed to send NotifySupply msg");
+                    }
                 } else {
-                    error!("Failed to send NotifySupply msg");
+                    let sx_res = SX_SERVICE_CLIENT_1.get().unwrap().lock().await.notify_demand(sxutil::DemandOpts{
+                        id: 0,
+                        target: 0,
+                        name: "Rust:Template".to_string(),
+                        json: msg.clone(),
+                        cdata: api::Content { entity: vec![] },
+                    }).await;
+                    if sx_res.is_some() {
+                        info!("Sent NotifyDemand msg[{}], {}", i, sx_res.unwrap());
+                    } else {
+                        error!("Failed to send NotifyDemand msg");
+                    }
                 }
                 i += 1;
             }
         }
         "subscribe" => {
             // Subscribe Mode
-            let spcb_async = Arc::from(sxutil::SupplyCallbackAsync {
-                func: Box::pin(|sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply| Box::pin(supply_callback(sxsv_clt, sp)))
-            });
 
-            let _loop_flag = sxutil::simple_subscribe_supply(
-                Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
-                spcb_async
-            );
+            match &*args.msg_type {
+                "supply" => {
+                    let spcb: sxutil::SupplyHandler = Box::pin(|sxsv_clt, sp| {
+                        Box::pin(supply_callback(sxsv_clt, sp))
+                    });
+
+                    let _loop_flag = sxutil::simple_subscribe_supply(
+                        Arc::clone(&*SX_SERVICE_CLIENT_1.get().unwrap()), 
+                        spcb
+                    );
+                }
+                "demand" => {
+                    let dmcb: sxutil::DemandHandler = Box::pin(|sxsv_clt, dm| {
+                        Box::pin(demand_callback(sxsv_clt, dm))
+                    });
+
+                    let _loop_flag = sxutil::simple_subscribe_demand(
+                        Arc::clone(&*SX_SERVICE_CLIENT_1.get().unwrap()), 
+                        dmcb
+                    );
+                }
+                &_ => {
+                    error!("Unknown Message Type!");
+                }
+            }
 
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -204,13 +317,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "echo" => {
             // Echo Mode
-            let spcb_async = Arc::from(sxutil::SupplyCallbackAsync {
-                func: Box::pin(|sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply| Box::pin(supply_callback_echo(sxsv_clt, sp)))
+
+            // Connect to Synerex server.
+            let client = sxutil::grpc_connect_server(String::from("http://") + SX_ADDR.get().unwrap().as_str()).await;  // sxServerAddress
+            debug!("SXSynerexClient2: {:?} {}", client, SX_ADDR.get().unwrap().as_str());
+            if client.is_none() {
+                error!("Failed to connect Synerex server.");
+                std::process::exit(1);
+            }
+
+            // Initialize Synerex service client.
+            let arg_json = String::from(format!("{{{}}}", nm));
+            SX_SERVICE_CLIENT_2.get_or_init(async {
+                let sx_service_client = sxutil::new_sx_service_client(client.unwrap(), synerex_proto::JSON_DATA_SVC, arg_json).await;
+                Arc::new(Mutex::new(sx_service_client)) 
+            }).await;
+            debug!("SXServiceClient2: {:?}", SX_SERVICE_CLIENT_2.get().unwrap().lock().await);
+
+            let spcb: sxutil::SupplyHandler = Box::pin(|sxsv_clt, sp| {
+                Box::pin(supply_callback_echo(sxsv_clt, sp))
             });
 
-            let _loop_flag = sxutil::simple_subscribe_supply(
-                Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
-                spcb_async
+            let dmcb: sxutil::DemandHandler = Box::pin(|sxsv_clt, dm| {
+                Box::pin(demand_callback_echo(sxsv_clt, dm))
+            });
+
+            let _loop_flag_sp = sxutil::simple_subscribe_supply(
+                Arc::clone(&*SX_SERVICE_CLIENT_1.get().unwrap()), 
+                spcb
+            );
+
+            let _loop_flag_dm = sxutil::simple_subscribe_demand(
+                Arc::clone(&*SX_SERVICE_CLIENT_2.get().unwrap()), 
+                dmcb
             );
 
             loop {
