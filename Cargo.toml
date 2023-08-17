@@ -13,7 +13,7 @@ env_logger = "0.10.0"
 log = "0.4.19"
 once_cell = "1.18.0"
 serde_json = "1.0.104"
-sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "66128f52dabd7c2b92502a2a44dbb2d79775a930"}
+sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "f3a3bcc1f0555eef05c6f38668640c8bc9b72cc3"}
 synerex_api = { git = "https://github.com/exdata-inc/synerex_api.git", rev = "9c32bb01d0440cf2300609815adf7129ac0f8da5"}
 synerex_proto = { git = "https://github.com/exdata-inc/synerex_proto.git", rev = "a2cad4f8278c4c5ceb4d73f97fd5e5d5c3ffda82"}
 tokio = { version = "1.29.1", features = ["full"] }

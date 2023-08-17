@@ -12,6 +12,10 @@ cargo run -- -m supply
 ```
 cargo run -- -m subscribe
 ```
+### Echo (Subscribe + Supply)
+```
+cargo run -- -m echo
+```
 
 ## Build
 ### for Development
