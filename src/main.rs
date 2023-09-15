@@ -3,13 +3,13 @@ extern crate log;
 extern crate env_logger as logger;
 
 // Standard Library
-use std::env;
+use std::{env, result};
 use std::sync::Arc;
 use std::convert::TryInto;
 
 // External Library
 use chrono::Local;
-use clap::Parser;
+use clap::{Parser, builder::Resettable};
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use prost::Message;
@@ -39,6 +39,18 @@ static SX_SERVICE_CLIENT: async_once_cell::OnceCell<Arc<RwLock<sxutil::SXService
 
 static LOOP_FLAG: once_cell::sync::Lazy<Mutex<Option<Arc<Mutex<bool>>>>> = once_cell::sync::Lazy::new(|| Mutex::from(None));
 
+async fn subscribe_mbus(mbus_id: u64, mbcb: fn(&sxutil::SXServiceClient, api::MbusMsg)) {
+    SX_SERVICE_CLIENT.get().unwrap().read().await.subscribe_mbus(mbus_id, mbcb).await;
+}
+
+fn mbus_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, mmsg: api::MbusMsg) {
+    info!("{:?}", mmsg);
+}
+
+fn mbus_callback_subscriber(_sxsv_clt: &sxutil::SXServiceClient, mmsg: api::MbusMsg) {
+    info!("{:?}", mmsg);
+}
+
 async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
         "Template:ProposeSupply" => {
@@ -48,11 +60,12 @@ async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::
             }
             match v["@type"].as_str().unwrap() {
                 "Template:ProposeSupply" => {
-                    info!("Rust Template SubscribeDemand Node's ProposeSupply Message: {:?}", v);
+                    info!("Rust Template SubscribeDemand Node's ProposeSupply Message: {:?}, {:?}", v, sp);
                     tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let sx_res = _sxsv_clt.select_supply(sp).await;
                     if sx_res.is_some() && sx_res.unwrap() > 0 {
-                        info!("Sent SelectSupply msg and confirmed!");
+                        info!("Sent SelectSupply msg and confirmed! Start Subscribing Mbus... mbus_id:{} self.id:{}", sx_res.unwrap(), _sxsv_clt.client_id);
+                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer));
                     } else {
                         error!("Failed to send SelectSupply msg");
                     }
@@ -77,11 +90,12 @@ async fn demand_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, dm: api::
             }
             match v["@type"].as_str().unwrap() {
                 "Template:ProposeDemand" => {
-                    info!("Rust Template SubscribeSupply Node's ProposeDemand Message: {:?}", v);
+                    info!("Rust Template SubscribeSupply Node's ProposeDemand Message: {:?}, {:?}", v, dm);
                     tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let sx_res = _sxsv_clt.select_demand(dm).await;
                     if sx_res.is_some() && sx_res.unwrap() > 0 {
-                        info!("Sent SelectDemand msg and confirmed!");
+                        info!("Sent SelectDemand msg and confirmed! Start Subscribing Mbus... mbus_id:{} self.id:{}", sx_res.unwrap(), _sxsv_clt.client_id);
+                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer));
                     } else {
                         error!("Failed to send SelectDemand msg");
                     }
@@ -106,7 +120,7 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
             }
             match v["@type"].as_str().unwrap() {
                 "Template:NotifySupply" => {
-                    info!("Rust Template NotifySupply Node's NotifySupply Message: {:?}", v);
+                    info!("Rust Template NotifySupply Node's NotifySupply Message: {:?}, {:?}", v, sp);
                     tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let msg = json!({
                         "@context": {
@@ -138,16 +152,34 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
         &_ => {
             info!("Possibly Rust Template NotifySupply Node's SelectDemand Message: {:?} {:?}", sp.supply_name.as_str(), sp);
             if _sxsv_clt.ni.as_ref().unwrap().read().await.node_state.proposed_demand_index(sp.target_id) != -1 {
+                let mut confirm_result = false;
                 match _sxsv_clt.confirm(sp.id, sp.target_id).await {
                     Ok(_) => {
                         info!("Confirmed!");
+                        confirm_result = true;
                     },
                     Err(err) => {
                         info!("Error: {:?}", err);
                     },
                 };
+                if confirm_result {
+                    //tokio::spawn(subscribe_mbus(sp.mbus_id, mbus_callback_subscriber));
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
+                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, sp:{:?}", sp.mbus_id, _sxsv_clt.client_id, sp);
+                    _sxsv_clt.send_mbus_msg(sp.mbus_id, api::MbusMsg{
+                        msg_id: 0,
+                        sender_id: sp.target_id,
+                        target_id: sp.sender_id,
+                        mbus_id: sp.mbus_id,
+                        msg_type: 0,
+                        msg_info: "data".to_string(),
+                        arg_json: "{}".to_string(),
+                        cdata: Some(api::Content { entity: vec![0,1,2] }),
+                    }).await;
+                    info!("Sent Mbus msg!");
+                }
             } else {
-                info!("unmatch id. sp.target_id:{}, self.client_id:{}", sp.target_id, SX_SERVICE_CLIENT.get().unwrap().read().await.client_id);
+                info!("unmatch id. sp.target_id:{}", sp.target_id);
             }
         }
     }
@@ -194,16 +226,34 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
         &_ => {
             info!("Possibly Rust Template NotifyDemand Node's SelectSupply Message: {:?} {:?}", dm.demand_name.as_str(), dm);
             if _sxsv_clt.ni.as_ref().unwrap().read().await.node_state.proposed_supply_index(dm.target_id) != -1 {
+                let mut confirm_result = false;
                 match _sxsv_clt.confirm(dm.id, dm.target_id).await {
                     Ok(_) => {
                         info!("Confirmed!");
+                        confirm_result = true;
                     },
                     Err(err) => {
                         info!("Error: {:?}", err);
                     },
                 };
+                if confirm_result {
+                    //tokio::spawn(subscribe_mbus(dm.mbus_id, mbus_callback_subscriber));
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
+                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, target:{}", dm.mbus_id, _sxsv_clt.client_id, dm.sender_id);
+                    _sxsv_clt.send_mbus_msg(dm.mbus_id, api::MbusMsg{
+                        msg_id: 0,
+                        sender_id: 0,
+                        target_id: dm.sender_id,
+                        mbus_id: dm.mbus_id,
+                        msg_type: 0,
+                        msg_info: "data".to_string(),
+                        arg_json: "{}".to_string(),
+                        cdata: Some(api::Content { entity: vec![0,1,2] }),
+                    }).await;
+                    info!("Sent Mbus msg!");
+                }
             } else {
-                info!("unmatch id. dm.target_id:{}, self.client_id:{}", dm.target_id, SX_SERVICE_CLIENT.get().unwrap().read().await.client_id);
+                info!("unmatch id. dm.target_id:{}", dm.target_id);
             }
         }
     }
