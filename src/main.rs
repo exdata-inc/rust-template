@@ -41,14 +41,21 @@ static LOOP_FLAG: once_cell::sync::Lazy<Mutex<Option<Arc<Mutex<bool>>>>> = once_
 
 async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
-        "Rust:TemplateEcho" => {
+        "Template:ProposeSupply" => {
             let v: serde_json::Value = serde_json::from_str(sp.arg_json.as_str()).unwrap();
             if v["@type"].as_str().is_none() {
                 error!("Unknown Supply Type! {:?}", v);
             }
             match v["@type"].as_str().unwrap() {
-                "rust:template-echo" => {
-                    info!("Rust Template Echo Supply: {:?}", v);
+                "Template:ProposeSupply" => {
+                    info!("Rust Template SubscribeDemand Node's ProposeSupply Message: {:?}", v);
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
+                    let sx_res = _sxsv_clt.select_supply(sp).await;
+                    if sx_res.is_some() && sx_res.unwrap() > 0 {
+                        info!("Sent SelectSupply msg and confirmed!");
+                    } else {
+                        error!("Failed to send SelectSupply msg");
+                    }
                 }
                 &_ => {
                     warn!("Unknown Supply: {:?} {:?}", sp.supply_name.as_str(), v);
@@ -63,14 +70,21 @@ async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::
 
 async fn demand_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Demand) {
     match dm.demand_name.as_str() {
-        "Rust:TemplateEcho" => {
+        "Template:ProposeDemand" => {
             let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
             if v["@type"].as_str().is_none() {
                 error!("Unknown Demand Type! {:?}", v);
             }
             match v["@type"].as_str().unwrap() {
-                "rust:template-echo" => {
-                    info!("Rust Template Echo Demand: {:?}", v);
+                "Template:ProposeDemand" => {
+                    info!("Rust Template SubscribeSupply Node's ProposeDemand Message: {:?}", v);
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
+                    let sx_res = _sxsv_clt.select_demand(dm).await;
+                    if sx_res.is_some() && sx_res.unwrap() > 0 {
+                        info!("Sent SelectDemand msg and confirmed!");
+                    } else {
+                        error!("Failed to send SelectDemand msg");
+                    }
                 }
                 &_ => {
                     warn!("Unknown Demand: {:?} {:?}", dm.demand_name.as_str(), v);
@@ -85,31 +99,33 @@ async fn demand_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, dm: api::
 
 async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
-        "Rust:Template" => {
+        "Template:NotifySupply" => {
             let v: serde_json::Value = serde_json::from_str(sp.arg_json.as_str()).unwrap();
             if v["@type"].as_str().is_none() {
                 error!("Unknown Supply Type! {:?}", v);
             }
             match v["@type"].as_str().unwrap() {
-                "rust:template" => {
-                    info!("Rust Template Supply: {:?}", v);
+                "Template:NotifySupply" => {
+                    info!("Rust Template NotifySupply Node's NotifySupply Message: {:?}", v);
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let msg = json!({
                         "@context": {
                             "schema": "https://schema.org/"
                         },
                         "@id": "supply_node",
-                        "@type": "rust:template-echo",
-                        "schema:name": format!("Demand Message from Supply-echo mode node for Supply[{}]", v["schema:identifier"])
+                        "@type": "Template:ProposeDemand",
+                        "schema:name": format!("Demand Message from SubscribeSupply mode node for Supply[{}]", v["schema:identifier"]),
+                        "schema:identifier": v["schema:identifier"],
                     }).to_string();
                     let sx_res = _sxsv_clt.propose_demand(sxutil::DemandOpts{
                         id: 0,
                         target: 0,
-                        name: "Rust:TemplateEcho".to_string(),
+                        name: "Template:ProposeDemand".to_string(),
                         json: msg.clone(),
                         cdata: api::Content { entity: vec![] },
                     }).await;
                     if sx_res > 0 {
-                        info!("Sent ProposeDemand msg, len: {}", msg.len());
+                        info!("Sent ProposeDemand msg, len: {}, id: {}", msg.len(), sx_res);
                     } else {
                         error!("Failed to send ProposeDemand msg");
                     }
@@ -120,38 +136,52 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
             }
         }
         &_ => {
-            warn!("Ignore Supply: {:?}", sp.supply_name.as_str());
+            info!("Possibly Rust Template NotifySupply Node's SelectDemand Message: {:?} {:?}", sp.supply_name.as_str(), sp);
+            if _sxsv_clt.ni.as_ref().unwrap().read().await.node_state.proposed_demand_index(sp.target_id) != -1 {
+                match _sxsv_clt.confirm(sp.id, sp.target_id).await {
+                    Ok(_) => {
+                        info!("Confirmed!");
+                    },
+                    Err(err) => {
+                        info!("Error: {:?}", err);
+                    },
+                };
+            } else {
+                info!("unmatch id. sp.target_id:{}, self.client_id:{}", sp.target_id, SX_SERVICE_CLIENT.get().unwrap().read().await.client_id);
+            }
         }
     }
 }
 
 async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Demand) {
     match dm.demand_name.as_str() {
-        "Rust:Template" => {
+        "Template:NotifyDemand" => {
             let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
             if v["@type"].as_str().is_none() {
                 error!("Unknown Demand Type! {:?}", v);
             }
             match v["@type"].as_str().unwrap() {
-                "rust:template" => {
-                    info!("Rust Template Demand: {:?}", v);
+                "Template:NotifyDemand" => {
+                    info!("Rust Template NotifyDemand Node's NotifyDemand Message: {:?}", v);
+                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let msg = json!({
                         "@context": {
                             "schema": "https://schema.org/"
                         },
                         "@id": "supply_node",
-                        "@type": "rust:template-echo",
-                        "schema:name": format!("Supply Message from Supply-echo mode node for Demand[{}]", v["schema:identifier"])
+                        "@type": "Template:ProposeSupply",
+                        "schema:name": format!("Supply Message from SubscribeDemand mode node for Demand[{}]", v["schema:identifier"]),
+                        "schema:identifier": v["schema:identifier"],
                     }).to_string();
                     let sx_res = _sxsv_clt.propose_supply(&sxutil::SupplyOpts{
                         id: 0,
                         target: 0,
-                        name: "Rust:TemplateEcho".to_string(),
+                        name: "Template:ProposeSupply".to_string(),
                         json: msg.clone(),
                         cdata: api::Content { entity: vec![] },
                     }).await;
                     if sx_res > 0 {
-                        info!("Sent ProposeSupply msg, len: {}", msg.len());
+                        info!("Sent ProposeSupply msg, len: {}, id: {}", msg.len(), sx_res);
                     } else {
                         error!("Failed to send ProposeSupply msg");
                     }
@@ -162,7 +192,19 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
             }
         }
         &_ => {
-            warn!("Ignore Demand: {:?}", dm.demand_name.as_str());
+            info!("Possibly Rust Template NotifyDemand Node's SelectSupply Message: {:?} {:?}", dm.demand_name.as_str(), dm);
+            if _sxsv_clt.ni.as_ref().unwrap().read().await.node_state.proposed_supply_index(dm.target_id) != -1 {
+                match _sxsv_clt.confirm(dm.id, dm.target_id).await {
+                    Ok(_) => {
+                        info!("Confirmed!");
+                    },
+                    Err(err) => {
+                        info!("Error: {:?}", err);
+                    },
+                };
+            } else {
+                info!("unmatch id. dm.target_id:{}, self.client_id:{}", dm.target_id, SX_SERVICE_CLIENT.get().unwrap().read().await.client_id);
+            }
         }
     }
 }
@@ -226,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "schema": "https://schema.org/"
                     },
                     "@id": "notify_node",
-                    "@type": "rust:template",
+                    "@type": format!("Template:Notify{}", &*args.msg_type),
                     "schema:name": format!("{} Message from Notify{} Mode Node. Count = {}", &*args.msg_type, &*args.msg_type, i),
                     "schema:identifier": i,
                 }).to_string();
@@ -237,7 +279,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let sx_res = SX_SERVICE_CLIENT.get().unwrap().read().await.notify_supply(sxutil::SupplyOpts{
                             id: 0,
                             target: 0,
-                            name: "Rust:Template".to_string(),
+                            name: "Template:NotifySupply".to_string(),
                             json: msg.clone(),
                             cdata: api::Content { entity: vec![] },
                         }).await;
@@ -261,7 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let sx_res = SX_SERVICE_CLIENT.get().unwrap().read().await.notify_demand(sxutil::DemandOpts{
                             id: 0,
                             target: 0,
-                            name: "Rust:Template".to_string(),
+                            name: "Template:NotifyDemand".to_string(),
                             json: msg.clone(),
                             cdata: api::Content { entity: vec![] },
                         }).await;
