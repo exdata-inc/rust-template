@@ -5,16 +5,19 @@ extern crate env_logger as logger;
 // Standard Library
 use std::env;
 use std::sync::Arc;
+use std::convert::TryInto;
 
 // External Library
 use chrono::Local;
 use clap::Parser;
 use serde_json::json;
 use tokio::sync::Mutex;
+use prost::Message;
 
 // Synerex Library
 use synerex_proto;
 use synerex_api::api;
+use dbp_schema::dbp_schema::RealWorldDataset;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -35,10 +38,15 @@ static SX_ADDR: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::n
 static SX_SERVICE_CLIENT_1: async_once_cell::OnceCell<Arc<Mutex<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
 static SX_SERVICE_CLIENT_2: async_once_cell::OnceCell<Arc<Mutex<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
 
-async fn supply_callback(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply) {
+async fn supply_callback(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
         "Rust:Template" => {
             let v: serde_json::Value = serde_json::from_str(sp.arg_json.as_str()).unwrap();
+            if sp.cdata.is_some() {
+                let cdata = sp.cdata.unwrap().entity;
+                // vec_try_into_prost!(Hello);
+                // let rwdataset_result: Result<RealWorldDataset, prost::DecodeError> = cdata.try_into();
+            }
             if v["@type"].as_str().is_none() {
                 error!("Unknown Supply Type! {:?}", v);
             }
@@ -71,7 +79,7 @@ async fn supply_callback(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Suppl
     }
 }
 
-async fn demand_callback(_sxsv_clt: &mut sxutil::SXServiceClient, dm: api::Demand) {
+async fn demand_callback(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Demand) {
     match dm.demand_name.as_str() {
         "Rust:Template" => {
             let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
@@ -107,7 +115,7 @@ async fn demand_callback(_sxsv_clt: &mut sxutil::SXServiceClient, dm: api::Deman
     }
 }
 
-async fn supply_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::Supply) {
+async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
     match sp.supply_name.as_str() {
         "Rust:Template" => {
             let v: serde_json::Value = serde_json::from_str(sp.arg_json.as_str()).unwrap();
@@ -149,7 +157,7 @@ async fn supply_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, sp: api::
     }
 }
 
-async fn demand_callback_echo(_sxsv_clt: &mut sxutil::SXServiceClient, dm: api::Demand) {
+async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Demand) {
     match dm.demand_name.as_str() {
         "Rust:Template" => {
             let v: serde_json::Value = serde_json::from_str(dm.arg_json.as_str()).unwrap();
