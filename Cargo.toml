@@ -16,7 +16,7 @@ once_cell = "1.18.0"
 prost = "0.11.9"
 prost-helper = "0.7.0"
 serde_json = "1.0.104"
-sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "dfb1171ed99f0336fec7954c7f0cb4eb2a8ece71"}
+sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "06891ab87e5a1805f45051ea7c03feb700c10517"}
 synerex_api = { git = "https://github.com/exdata-inc/synerex_api.git", rev = "9c32bb01d0440cf2300609815adf7129ac0f8da5"}
 synerex_proto = { git = "https://github.com/exdata-inc/synerex_proto.git", rev = "a2cad4f8278c4c5ceb4d73f97fd5e5d5c3ffda82"}
 tokio = { version = "1.29.1", features = ["full"] }

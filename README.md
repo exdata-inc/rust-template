@@ -4,25 +4,27 @@ Template repository for Rust projects with sxutil
 ## Run
 You should run [Synerex Nodeserv](https://github.com/synerex/synerex_nodeserv) and [Synerex Server](https://github.com/synerex/synerex_server) before running commands below.
 
-### Notifier
-It will notify demand and supply message alternately.
+### DemandSubscriber (Service)
+It will subscribe demand message from DemandNotifier and propse supply.
 ```
-cargo run -- -m notify
+cargo run -- -m subscribe -t Demand
 ```
-### DemandSubscriber
-It will subscribe demand message from above notifier.
+### SupplySubscriber (Client)
+It will subscribe supply message from SupplyNotifier and propose demand.
 ```
-cargo run -- -m subscribe -t demand
+cargo run -- -m subscribe -t Supply
 ```
-### SupplySubscriber
-It will subscribe supply message from above notifier.
+### DemandNotifier (Client)
+It will notify demand message and subscribe supply from DemandSubscriber.
+Note: Please start DemandSubscriber before starting this.
 ```
-cargo run -- -m subscribe -t supply
+cargo run -- -m notify -t Demand
 ```
-### Echo (Subscribe + Notify)
-It will subscribe demand and supply message from above notifier and send echo message.
+### SupplyNotifier (Service)
+It will notify supply message and subscribe demand from SupplySubscriber.
+Note: Please start SupplySubscriber before starting this.
 ```
-cargo run -- -m echo
+cargo run -- -m notify -t Supply
 ```
 
 ## Build
