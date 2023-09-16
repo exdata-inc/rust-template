@@ -35,20 +35,23 @@ struct Args {
 }
 
 static SX_ADDR: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
-static SX_SERVICE_CLIENT: async_once_cell::OnceCell<Arc<RwLock<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
+static SX_SERVICE_CLIENT_1: async_once_cell::OnceCell<Arc<RwLock<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
+static SX_SERVICE_CLIENT_2: async_once_cell::OnceCell<Arc<RwLock<sxutil::SXServiceClient>>> = async_once_cell::OnceCell::new();
 
 static LOOP_FLAG: once_cell::sync::Lazy<Mutex<Option<Arc<Mutex<bool>>>>> = once_cell::sync::Lazy::new(|| Mutex::from(None));
+static ARGS: once_cell::sync::OnceCell<Args> = once_cell::sync::OnceCell::new();
 
-async fn subscribe_mbus(mbus_id: u64, mbcb: fn(&sxutil::SXServiceClient, api::MbusMsg)) {
-    SX_SERVICE_CLIENT.get().unwrap().read().await.subscribe_mbus(mbus_id, mbcb).await;
+async fn subscribe_mbus(mbus_id: u64, mbcb: fn(&sxutil::SXServiceClient, api::MbusMsg), client_id: u64) {
+    info!("Start Subscribing Mbus... mbus_id:{} self.id:{}", mbus_id, client_id);
+    SX_SERVICE_CLIENT_1.get().unwrap().read().await.subscribe_mbus(mbus_id, mbcb).await;
 }
 
 fn mbus_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, mmsg: api::MbusMsg) {
-    info!("{:?}", mmsg);
+    info!("Received: {:?}", mmsg);
 }
 
 fn mbus_callback_subscriber(_sxsv_clt: &sxutil::SXServiceClient, mmsg: api::MbusMsg) {
-    info!("{:?}", mmsg);
+    info!("Received: {:?}", mmsg);
 }
 
 async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supply) {
@@ -61,11 +64,11 @@ async fn supply_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, sp: api::
             match v["@type"].as_str().unwrap() {
                 "Template:ProposeSupply" => {
                     info!("Rust Template SubscribeDemand Node's ProposeSupply Message: {:?}, {:?}", v, sp);
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let sx_res = _sxsv_clt.select_supply(sp).await;
                     if sx_res.is_some() && sx_res.unwrap() > 0 {
-                        info!("Sent SelectSupply msg and confirmed! Start Subscribing Mbus... mbus_id:{} self.id:{}", sx_res.unwrap(), _sxsv_clt.client_id);
-                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer));
+                        let client_id = _sxsv_clt.client_id;
+                        info!("Sent SelectSupply msg and confirmed! clt.mbus_ids: {:?}", _sxsv_clt.mbus_ids);
+                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer, client_id));
                     } else {
                         error!("Failed to send SelectSupply msg");
                     }
@@ -91,11 +94,11 @@ async fn demand_callback_notifyer(_sxsv_clt: &sxutil::SXServiceClient, dm: api::
             match v["@type"].as_str().unwrap() {
                 "Template:ProposeDemand" => {
                     info!("Rust Template SubscribeSupply Node's ProposeDemand Message: {:?}, {:?}", v, dm);
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let sx_res = _sxsv_clt.select_demand(dm).await;
                     if sx_res.is_some() && sx_res.unwrap() > 0 {
-                        info!("Sent SelectDemand msg and confirmed! Start Subscribing Mbus... mbus_id:{} self.id:{}", sx_res.unwrap(), _sxsv_clt.client_id);
-                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer));
+                        let client_id = _sxsv_clt.client_id;
+                        info!("Sent SelectDemand msg and confirmed! clt.mbus_ids: {:?}", _sxsv_clt.mbus_ids);
+                        tokio::spawn(subscribe_mbus(sx_res.unwrap(), mbus_callback_notifyer, client_id));
                     } else {
                         error!("Failed to send SelectDemand msg");
                     }
@@ -121,11 +124,8 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
             match v["@type"].as_str().unwrap() {
                 "Template:NotifySupply" => {
                     info!("Rust Template NotifySupply Node's NotifySupply Message: {:?}, {:?}", v, sp);
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let msg = json!({
-                        "@context": {
-                            "schema": "https://schema.org/"
-                        },
+                        "@context": { "schema": "https://schema.org/" },
                         "@id": "supply_node",
                         "@type": "Template:ProposeDemand",
                         "schema:name": format!("Demand Message from SubscribeSupply mode node for Supply[{}]", v["schema:identifier"]),
@@ -163,17 +163,17 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
                     },
                 };
                 if confirm_result {
-                    //tokio::spawn(subscribe_mbus(sp.mbus_id, mbus_callback_subscriber));
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
-                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, sp:{:?}", sp.mbus_id, _sxsv_clt.client_id, sp);
+                    let client_id = _sxsv_clt.client_id;
+                    tokio::spawn(subscribe_mbus(sp.mbus_id, mbus_callback_subscriber, client_id));
+                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, target:{}", sp.mbus_id, client_id, sp.sender_id);
                     _sxsv_clt.send_mbus_msg(sp.mbus_id, api::MbusMsg{
-                        msg_id: 0,
-                        sender_id: sp.target_id,
-                        target_id: sp.sender_id,
+                        msg_id: 0,                  // automatically filled
+                        sender_id: 0,               // automatically filled
+                        target_id: 0,
                         mbus_id: sp.mbus_id,
                         msg_type: 0,
                         msg_info: "data".to_string(),
-                        arg_json: "{}".to_string(),
+                        arg_json: "".to_string(),
                         cdata: Some(api::Content { entity: vec![0,1,2] }),
                     }).await;
                     info!("Sent Mbus msg!");
@@ -195,11 +195,8 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
             match v["@type"].as_str().unwrap() {
                 "Template:NotifyDemand" => {
                     info!("Rust Template NotifyDemand Node's NotifyDemand Message: {:?}", v);
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
                     let msg = json!({
-                        "@context": {
-                            "schema": "https://schema.org/"
-                        },
+                        "@context": { "schema": "https://schema.org/" },
                         "@id": "supply_node",
                         "@type": "Template:ProposeSupply",
                         "schema:name": format!("Supply Message from SubscribeDemand mode node for Demand[{}]", v["schema:identifier"]),
@@ -237,18 +234,18 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
                     },
                 };
                 if confirm_result {
-                    //tokio::spawn(subscribe_mbus(dm.mbus_id, mbus_callback_subscriber));
-                    tokio::time::sleep(tokio::time::Duration::from_micros(10)).await;
-                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, target:{}", dm.mbus_id, _sxsv_clt.client_id, dm.sender_id);
+                    let client_id = _sxsv_clt.client_id;
+                    tokio::spawn(subscribe_mbus(dm.mbus_id, mbus_callback_subscriber, client_id));
+                    info!("Sending Mbus msg... mbus_id:{}, self.id:{}, target:{}", dm.mbus_id, client_id, dm.sender_id);
                     _sxsv_clt.send_mbus_msg(dm.mbus_id, api::MbusMsg{
-                        msg_id: 0,
-                        sender_id: 0,
-                        target_id: dm.sender_id,
+                        msg_id: 0,                  // automatically filled
+                        sender_id: 0,               // automatically filled
+                        target_id: 0,
                         mbus_id: dm.mbus_id,
                         msg_type: 0,
                         msg_info: "data".to_string(),
-                        arg_json: "{}".to_string(),
-                        cdata: Some(api::Content { entity: vec![0,1,2] }),
+                        arg_json: "".to_string(),
+                        cdata: Some(api::Content { entity: vec![3,4,5] }),
                     }).await;
                     info!("Sent Mbus msg!");
                 }
@@ -259,17 +256,64 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
     }
 }
 
+async fn run_notify(i: i32) {
+    let msg = json!({
+        "@context": { "schema": "https://schema.org/" },
+        "@id": "notify_node",
+        "@type": format!("Template:Notify{}", ARGS.get().unwrap().msg_type),
+        "schema:name": format!("{} Message from Notify{} Mode Node. Count = {}", ARGS.get().unwrap().msg_type, ARGS.get().unwrap().msg_type, i),
+        "schema:identifier": i,
+    }).to_string();
+    
+    match &*ARGS.get().unwrap().msg_type {
+        "Supply" => {
+            info!("Sending NotifySupply msg[{}]", i);
+            let sx_res = SX_SERVICE_CLIENT_1.get().unwrap().read().await.notify_supply(sxutil::SupplyOpts{
+                id: 0,
+                target: 0,
+                name: "Template:NotifySupply".to_string(),
+                json: msg.clone(),
+                cdata: api::Content { entity: vec![] },
+            }).await;
+            if sx_res.is_some() {
+                info!("Sent NotifySupply msg[{}], {}", i, sx_res.unwrap());
+            } else {
+                error!("Failed to send NotifySupply msg");
+            }
+        }
+        "Demand" => {
+            info!("Sending NotifyDemand msg[{}]", i);
+            let sx_res = SX_SERVICE_CLIENT_1.get().unwrap().read().await.notify_demand(sxutil::DemandOpts{
+                id: 0,
+                target: 0,
+                name: "Template:NotifyDemand".to_string(),
+                json: msg.clone(),
+                cdata: api::Content { entity: vec![] },
+            }).await;
+            if sx_res.is_some() {
+                info!("Sent NotifyDemand msg[{}], {}", i, sx_res.unwrap());  
+            } else {
+                error!("Failed to send NotifyDemand msg");
+            }
+        }
+        &_ => {
+            error!("Unknown Message Type!");
+        }    
+    };
+}
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    env::set_var("RUST_LOG", args.log_level);
+    env::set_var("RUST_LOG", args.log_level.clone());
     logger::init();
 
     let start_time = Local::now();
     info!("Started Program at {}", start_time.format("%F %T %:z"));
 
-    debug!("Using Synerex Config: Node: {}, Synerex: {}", args.node_addr, args.sx_addr);
+    debug!("Using Synerex Config: Node: {}, Synerex: {}", args.node_addr, args.sx_addr.clone());
 
     // Set your target channel types and nm here.
     let channel_types = vec![synerex_proto::JSON_DATA_SVC];
@@ -279,7 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sx_addr = match sxutil::register_node(String::from("http://") + args.node_addr.as_str(), nm.clone(), channel_types, None).await {
         Ok(srv) => {
             tokio::spawn(sxutil::start_keep_alive_with_cmd(None));
-            if args.sx_addr != "use_default" { args.sx_addr }
+            if args.sx_addr.clone() != "use_default" { args.sx_addr.clone() }
             else { srv }
         },
         Err(err) => {
@@ -291,105 +335,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("SX_ADDR: {:?} ({:?})", SX_ADDR.get(), set_result);
 
     // Connect to Synerex server.
-	let client = sxutil::grpc_connect_server(String::from("http://") + SX_ADDR.get().unwrap().as_str()).await;  // sxServerAddress
-    debug!("SXSynerexClient: {:?} {}", client, SX_ADDR.get().unwrap().as_str());
-    if client.is_none() {
+	let client_1 = sxutil::grpc_connect_server(String::from("http://") + SX_ADDR.get().unwrap().as_str()).await;  // sxServerAddress
+    debug!("SXSynerexClient: {:?} {}", client_1, SX_ADDR.get().unwrap().as_str());
+    if client_1.is_none() {
         error!("Failed to connect Synerex server.");
         std::process::exit(1);
     }
 
     // Initialize Synerex service client.
-    let arg_json = String::from(format!("{{{}}}", nm));
-    SX_SERVICE_CLIENT.get_or_init(async {
-        let sx_service_client = sxutil::new_sx_service_client(client.unwrap(), synerex_proto::JSON_DATA_SVC, arg_json).await;
+    let arg_json_1 = String::from(format!("{{{}}}", nm));
+    SX_SERVICE_CLIENT_1.get_or_init(async {
+        let sx_service_client = sxutil::new_sx_service_client(client_1.unwrap(), synerex_proto::JSON_DATA_SVC, arg_json_1).await;
         Arc::new(RwLock::from(sx_service_client)) 
     }).await;
-    debug!("SXServiceClient: {:?}", SX_SERVICE_CLIENT.get().unwrap().read().await);
+    debug!("SXServiceClient: {:?}", SX_SERVICE_CLIENT_1.get().unwrap().read().await);
 
-    match &*args.mode {
+    // Connect to Synerex server.
+    let client_2 = sxutil::grpc_connect_server(String::from("http://") + SX_ADDR.get().unwrap().as_str()).await;  // sxServerAddress
+    debug!("SXSynerexClient: {:?} {}", client_2, SX_ADDR.get().unwrap().as_str());
+    if client_2.is_none() {
+        error!("Failed to connect Synerex server.");
+        std::process::exit(1);
+    }
+
+    // Initialize Synerex service client.
+    let arg_json_2 = String::from(format!("{{{}}}", nm));
+    SX_SERVICE_CLIENT_2.get_or_init(async {
+        let sx_service_client = sxutil::new_sx_service_client(client_2.unwrap(), synerex_proto::JSON_DATA_SVC, arg_json_2).await;
+        Arc::new(RwLock::from(sx_service_client)) 
+    }).await;
+    debug!("SXServiceClient: {:?}", SX_SERVICE_CLIENT_2.get().unwrap().read().await);
+
+    let _ = ARGS.set(args);
+
+    match &*ARGS.get().unwrap().mode {
         "notify" => {
             // Notify Mode
+
+
             
+            match &*ARGS.get().unwrap().msg_type {
+                "Supply" => {
+                    let dmcb: sxutil::DemandHandler = Box::pin(|sxsv_clt, dm| {
+                        Box::pin(demand_callback_notifyer(sxsv_clt, dm))
+                    });
+                    let _loop_flag = sxutil::simple_subscribe_demand(
+                        Arc::clone(&*SX_SERVICE_CLIENT_2.get().unwrap()), 
+                        dmcb
+                    );
+                }
+                "Demand" => {
+                    let spcb: sxutil::SupplyHandler = Box::pin(|sxsv_clt, sp| {
+                        Box::pin(supply_callback_notifyer(sxsv_clt, sp))
+                    });
+                    let _loop_flag = sxutil::simple_subscribe_supply(
+                        Arc::clone(&*SX_SERVICE_CLIENT_2.get().unwrap()), 
+                        spcb
+                    );
+                }
+                &_ => {
+                    error!("Unknown Message Type!");
+                }    
+            };
+
             let mut i = 0;
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                let msg = json!({
-                    "@context": {
-                        "schema": "https://schema.org/"
-                    },
-                    "@id": "notify_node",
-                    "@type": format!("Template:Notify{}", &*args.msg_type),
-                    "schema:name": format!("{} Message from Notify{} Mode Node. Count = {}", &*args.msg_type, &*args.msg_type, i),
-                    "schema:identifier": i,
-                }).to_string();
-                
-                match &*args.msg_type {
-                    "Supply" => {
-                        info!("Sending NotifySupply msg[{}]", i);
-                        let sx_res = SX_SERVICE_CLIENT.get().unwrap().read().await.notify_supply(sxutil::SupplyOpts{
-                            id: 0,
-                            target: 0,
-                            name: "Template:NotifySupply".to_string(),
-                            json: msg.clone(),
-                            cdata: api::Content { entity: vec![] },
-                        }).await;
-                        if sx_res.is_some() {
-                            info!("Sent NotifySupply msg[{}], {}", i, sx_res.unwrap());
-                            if LOOP_FLAG.lock().await.as_ref().is_none() {
-                                let dmcb: sxutil::DemandHandler = Box::pin(|sxsv_clt, dm| {
-                                    Box::pin(demand_callback_notifyer(sxsv_clt, dm))
-                                });
-                                *LOOP_FLAG.lock().await = Some(sxutil::simple_subscribe_demand(
-                                    Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
-                                    dmcb
-                                ));
-                            }     
-                        } else {
-                            error!("Failed to send NotifySupply msg");
-                        }
-                    }
-                    "Demand" => {
-                        info!("Sending NotifyDemand msg[{}]", i);
-                        let sx_res = SX_SERVICE_CLIENT.get().unwrap().read().await.notify_demand(sxutil::DemandOpts{
-                            id: 0,
-                            target: 0,
-                            name: "Template:NotifyDemand".to_string(),
-                            json: msg.clone(),
-                            cdata: api::Content { entity: vec![] },
-                        }).await;
-                        if sx_res.is_some() {
-                            info!("Sent NotifyDemand msg[{}], {}", i, sx_res.unwrap());
-                            if LOOP_FLAG.lock().await.as_ref().is_none() {
-                                let spcb: sxutil::SupplyHandler = Box::pin(|sxsv_clt, sp| {
-                                    Box::pin(supply_callback_notifyer(sxsv_clt, sp))
-                                });
-                                *LOOP_FLAG.lock().await = Some(sxutil::simple_subscribe_supply(
-                                    Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
-                                    spcb
-                                ));
-                            }     
-                        } else {
-                            error!("Failed to send NotifyDemand msg");
-                        }
-                    }
-                    &_ => {
-                        error!("Unknown Message Type!");
-                    }    
-                }
+                tokio::spawn(run_notify(i));
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 i += 1;
             }
         }
         "subscribe" => {
             // Subscribe Mode
 
-            match &*args.msg_type {
+            match &*ARGS.get().unwrap().msg_type {
                 "Supply" => {
                     let spcb: sxutil::SupplyHandler = Box::pin(|sxsv_clt, sp| {
                         Box::pin(supply_callback_echo(sxsv_clt, sp))
                     });
 
                     let _loop_flag = sxutil::simple_subscribe_supply(
-                        Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
+                        Arc::clone(&*SX_SERVICE_CLIENT_2.get().unwrap()), 
                         spcb
                     );
                 }
@@ -399,7 +425,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
 
                     let _loop_flag = sxutil::simple_subscribe_demand(
-                        Arc::clone(&*SX_SERVICE_CLIENT.get().unwrap()), 
+                        Arc::clone(&*SX_SERVICE_CLIENT_2.get().unwrap()), 
                         dmcb
                     );
                 }

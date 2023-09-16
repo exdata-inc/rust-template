@@ -11,15 +11,15 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.3.19", features = ["derive"] }
 dbp_schema = { git = "https://github.com/exdata-inc/dbp-schema.git", rev = "865b9fb836a518eb0e49502bab5d41e054485421"}
 env_logger = "0.10.0"
-log = "0.4.19"
+log = "0.4.20"
 once_cell = "1.18.0"
-prost = "0.11.9"
+prost = "0.12.1"
 prost-helper = "0.7.0"
 serde_json = "1.0.104"
-sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "334c129c15d35bce288db55fe6f37d75ad01b366"}
-synerex_api = { git = "https://github.com/exdata-inc/synerex_api.git", rev = "9c32bb01d0440cf2300609815adf7129ac0f8da5"}
+sxutil = { git = "https://github.com/exdata-inc/synerex_sxutil/", rev = "2052bb076c13aea67f7de82e2f787ae856da0e14"}
+synerex_api = { git = "https://github.com/exdata-inc/synerex_api.git", rev = "1e3c21262c2be12cdaf919f6020a8893b5cb4578"}
 synerex_proto = { git = "https://github.com/exdata-inc/synerex_proto.git", rev = "a2cad4f8278c4c5ceb4d73f97fd5e5d5c3ffda82"}
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { version = "1.32.0", features = ["full"] }
 
 [build-dependencies]
 prost-serde = "0.3"
