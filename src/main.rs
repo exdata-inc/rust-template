@@ -133,7 +133,7 @@ async fn supply_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, sp: api::Supp
                     }).to_string();
                     let sx_res = _sxsv_clt.propose_demand(sxutil::DemandOpts{
                         id: 0,
-                        target: 0,
+                        target: sp.id,
                         name: "Template:ProposeDemand".to_string(),
                         json: msg.clone(),
                         cdata: api::Content { entity: vec![] },
@@ -204,7 +204,7 @@ async fn demand_callback_echo(_sxsv_clt: &sxutil::SXServiceClient, dm: api::Dema
                     }).to_string();
                     let sx_res = _sxsv_clt.propose_supply(&sxutil::SupplyOpts{
                         id: 0,
-                        target: 0,
+                        target: dm.id,
                         name: "Template:ProposeSupply".to_string(),
                         json: msg.clone(),
                         cdata: api::Content { entity: vec![] },
